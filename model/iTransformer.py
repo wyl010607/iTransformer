@@ -47,21 +47,26 @@ class Model(nn.Module):
             stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
             x_enc /= stdev
 
-        _, _, N = x_enc.shape # B L N
-        # B: batch_size;    E: d_model; 
-        # L: seq_len;       S: pred_len;
-        # N: number of variate (tokens), can also includes covariates
+        _, L, N = x_enc.shape  # B L N
+
+        # Perform Fourier Transform along the L dimension
+        x_enc_fft = torch.fft.fft(x_enc, dim=1)
+
+        # Use real part of the FFT result (you can also use the magnitude or any other representation)
+        x_enc_fft_real = x_enc_fft.real
+
+        # Move the tensor to CUDA if necessary
+        if torch.cuda.is_available():
+            x_enc_fft_real = x_enc_fft_real.to('cuda')
 
         # Embedding
-        # B L N -> B N E                (B L N -> B L E in the vanilla Transformer)
-        enc_out = self.enc_embedding(x_enc, x_mark_enc) # covariates (e.g timestamp) can be also embedded as tokens
-        
-        # B N E -> B N E                (B L E -> B L E in the vanilla Transformer)
-        # the dimensions of embedded time series has been inverted, and then processed by native attn, layernorm and ffn modules
+        enc_out = self.enc_embedding(x_enc_fft_real, x_mark_enc)
+
+        # Encoding
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
 
-        # B N E -> B N S -> B S N 
-        dec_out = self.projector(enc_out).permute(0, 2, 1)[:, :, :N] # filter the covariates
+        # Project and permute
+        dec_out = self.projector(enc_out).permute(0, 2, 1)[:, :, :N]  # filter the covariates
 
         if self.use_norm:
             # De-Normalization from Non-stationary Transformer
