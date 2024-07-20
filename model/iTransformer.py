@@ -52,15 +52,19 @@ class Model(nn.Module):
         # Perform Fourier Transform along the L dimension
         x_enc_fft = torch.fft.fft(x_enc, dim=1)
 
-        # Use real part of the FFT result (you can also use the magnitude or any other representation)
-        x_enc_fft_real = x_enc_fft.real
+        # Extract magnitude and phase
+        x_enc_magnitude = torch.abs(x_enc_fft)
+        x_enc_phase = torch.angle(x_enc_fft)
+
+        # Concatenate magnitude and phase along the N dimension
+        x_enc_fft_features = torch.cat([x_enc_magnitude, x_enc_phase], dim=-1)  # B L 2N
 
         # Move the tensor to CUDA if necessary
         if torch.cuda.is_available():
-            x_enc_fft_real = x_enc_fft_real.to('cuda')
+            x_enc_fft_features = x_enc_fft_features.to('cuda')
 
         # Embedding
-        enc_out = self.enc_embedding(x_enc_fft_real, x_mark_enc)
+        enc_out = self.enc_embedding(x_enc_fft_features, x_mark_enc)
 
         # Encoding
         enc_out, attns = self.encoder(enc_out, attn_mask=None)
