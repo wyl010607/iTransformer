@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -53,6 +54,72 @@ class EncoderLayer(nn.Module):
 
         return self.norm2(x + y), attn
 
+class FreMLP(nn.Module):
+    def __init__(self, input_size, output_size, scale=0.02):
+        super(FreMLP, self).__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+        self.r = nn.Parameter(scale * torch.randn(input_size, output_size))
+        self.i = nn.Parameter(scale * torch.randn(input_size, output_size))
+        self.rb = nn.Parameter(scale * torch.randn(output_size))
+        self.ib = nn.Parameter(scale * torch.randn(output_size))
+        self.sparsity_threshold = 0.01  # Could be adjustable
+
+    def forward(self, x):
+        # x is expected to be complex valued input
+        o1_real = F.relu(torch.einsum('bijd,dd->bijd', x.real, self.r) -
+                         torch.einsum('bijd,dd->bijd', x.imag, self.i) +
+                         self.rb)
+        o1_imag = F.relu(torch.einsum('bijd,dd->bijd', x.imag, self.r) +
+                         torch.einsum('bijd,dd->bijd', x.real, self.i) +
+                         self.ib)
+
+        y = torch.stack([o1_real, o1_imag], dim=-1)
+        y = F.softshrink(y, lambd=self.sparsity_threshold)
+        y = torch.view_as_complex(y)
+        return y
+
+class FreEncoderLayer(nn.Module):
+    def __init__(self, attention, d_model, d_ff=None, dropout=0.1, activation="relu"):
+        super(FreEncoderLayer, self).__init__()
+        d_ff = d_ff or 4 * d_model
+        self.attention = attention
+        self.FreMLP1 = FreMLP(d_model, d_ff)
+        self.FreMLP2 = FreMLP(d_ff, d_model)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = F.relu if activation == "relu" else F.gelu
+
+    def forward(self, x, attn_mask=None, tau=None, delta=None):
+        if self.attention is not None:
+            new_x, attn = self.attention(x, x, x, attn_mask=attn_mask, tau=tau, delta=delta)
+        else:
+            new_x = x
+            attn = None
+        x = x + self.dropout(new_x)
+        y = self.norm1(x)
+
+        # Prepare data for frequency domain processing
+        # Expecting x of shape [Batch, Seq_len, Model_dim]
+        x_fft = torch.fft.rfft(y, dim=-1, norm='ortho')  # Apply FFT along the last dimension
+
+        # Apply the first FreMLP after FFT
+        y = self.FreMLP1(x_fft)
+        y = torch.fft.irfft(y, n=d_model, dim=-1, norm="ortho")  # Convert back from frequency to time domain
+
+        # Activation and Dropout
+        y = self.activation(y)
+        y = self.dropout(y)
+
+        # Apply the second FreMLP
+        y_fft = torch.fft.rfft(y, dim=-1, norm='ortho')  # FFT again for the second FreMLP
+        y = self.FreMLP2(y_fft)
+        y = torch.fft.irfft(y, n=d_model, dim=-1, norm="ortho")  # Back to time domain
+
+        # Final normalization and residual connection
+        y = self.dropout(y)
+        return self.norm2(x + y), attn
 
 class Encoder(nn.Module):
     def __init__(self, attn_layers, conv_layers=None, norm_layer=None):
