@@ -58,12 +58,12 @@ class EncoderLayer(nn.Module):
 class FreMLP(nn.Module):
     def __init__(self, input_size, output_size, scale=0.02):
         super(FreMLP, self).__init__()
-        self.input_size = input_size
-        self.output_size = output_size
-        self.r = nn.Parameter(scale * torch.randn(input_size, output_size))
-        self.i = nn.Parameter(scale * torch.randn(input_size, output_size))
-        self.rb = nn.Parameter(scale * torch.randn(output_size))
-        self.ib = nn.Parameter(scale * torch.randn(output_size))
+        self.input_size = input_size // 2 + 1
+        self.output_size = output_size // 2 + 1
+        self.r = nn.Parameter(scale * torch.randn(self.input_size, self.output_size))
+        self.i = nn.Parameter(scale * torch.randn(self.input_size, self.output_size))
+        self.rb = nn.Parameter(scale * torch.randn(self.output_size))
+        self.ib = nn.Parameter(scale * torch.randn(self.output_size))
         self.sparsity_threshold = 0.01  # Could be adjustable
 
     def forward(self, x):
