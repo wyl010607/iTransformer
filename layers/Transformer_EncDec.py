@@ -85,6 +85,7 @@ class FreEncoderLayer(nn.Module):
         super(FreEncoderLayer, self).__init__()
         d_ff = d_ff or 4 * d_model
         self.attention = attention
+        self.d_model = d_model
         self.FreMLP1 = FreMLP(d_model, d_ff)
         self.FreMLP2 = FreMLP(d_ff, d_model)
         self.norm1 = nn.LayerNorm(d_model)
