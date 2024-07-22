@@ -29,6 +29,7 @@ class EncoderLayer(nn.Module):
         super(EncoderLayer, self).__init__()
         d_ff = d_ff or 4 * d_model
         self.attention = attention
+        self.d_model = d_model
         self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=d_ff, kernel_size=1)
         self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=d_model, kernel_size=1)
         self.norm1 = nn.LayerNorm(d_model)
@@ -67,11 +68,11 @@ class FreMLP(nn.Module):
 
     def forward(self, x):
         # x is expected to be complex valued input
-        o1_real = F.relu(torch.einsum('bijd,dd->bijd', x.real, self.r) -
-                         torch.einsum('bijd,dd->bijd', x.imag, self.i) +
+        o1_real = F.relu(torch.einsum('bid,do->bio', x.real, self.r) -
+                         torch.einsum('bid,do->bio', x.imag, self.i) +
                          self.rb)
-        o1_imag = F.relu(torch.einsum('bijd,dd->bijd', x.imag, self.r) +
-                         torch.einsum('bijd,dd->bijd', x.real, self.i) +
+        o1_imag = F.relu(torch.einsum('bid,do->bio', x.imag, self.r) +
+                         torch.einsum('bid,do->bio', x.real, self.i) +
                          self.ib)
 
         y = torch.stack([o1_real, o1_imag], dim=-1)
@@ -102,20 +103,20 @@ class FreEncoderLayer(nn.Module):
 
         # Prepare data for frequency domain processing
         # Expecting x of shape [Batch, Seq_len, Model_dim]
-        x_fft = torch.fft.rfft(y, dim=-1, norm='ortho')  # Apply FFT along the last dimension
+        x_fft = torch.fft.rfft(y, n=self.d_model, dim=-1, norm='ortho')  # Apply FFT along the last dimension
 
         # Apply the first FreMLP after FFT
         y = self.FreMLP1(x_fft)
-        y = torch.fft.irfft(y, n=d_model, dim=-1, norm="ortho")  # Convert back from frequency to time domain
+        y = torch.fft.irfft(y, n=self.d_model, dim=-1, norm="ortho")  # Convert back from frequency to time domain
 
         # Activation and Dropout
         y = self.activation(y)
         y = self.dropout(y)
 
         # Apply the second FreMLP
-        y_fft = torch.fft.rfft(y, dim=-1, norm='ortho')  # FFT again for the second FreMLP
+        y_fft = torch.fft.rfft(y, n=self.d_model, dim=-1, norm='ortho')  # FFT again for the second FreMLP
         y = self.FreMLP2(y_fft)
-        y = torch.fft.irfft(y, n=d_model, dim=-1, norm="ortho")  # Back to time domain
+        y = torch.fft.irfft(y, n=self.d_model, dim=-1, norm="ortho")  # Back to time domain
 
         # Final normalization and residual connection
         y = self.dropout(y)
